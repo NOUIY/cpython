@@ -5,6 +5,7 @@ import math
 import os.path
 import platform
 import random
+import re
 import shlex
 import signal
 import subprocess
@@ -275,7 +276,7 @@ def clear_caches():
     except KeyError:
         pass
     else:
-        inspect._shadowed_dict_from_mro_tuple.cache_clear()
+        inspect._shadowed_dict_from_weakref_mro_tuple.cache_clear()
         inspect._filesbymodname.clear()
         inspect.modulesbyfile.clear()
 
@@ -698,9 +699,38 @@ def get_signal_name(exitcode):
         except ValueError:
             pass
 
+    # Shell exit code (ex: WASI build)
+    if 128 < exitcode < 256:
+        signum = exitcode - 128
+        try:
+            return signal.Signals(signum).name
+        except ValueError:
+            pass
+
     try:
         return WINDOWS_STATUS[exitcode]
     except KeyError:
         pass
 
     return None
+
+
+ILLEGAL_XML_CHARS_RE = re.compile(
+    '['
+    # Control characters; newline (\x0A and \x0D) and TAB (\x09) are legal
+    '\x00-\x08\x0B\x0C\x0E-\x1F'
+    # Surrogate characters
+    '\uD800-\uDFFF'
+    # Special Unicode characters
+    '\uFFFE'
+    '\uFFFF'
+    # Match multiple sequential invalid characters for better effiency
+    ']+')
+
+def _sanitize_xml_replace(regs):
+    text = regs[0]
+    return ''.join(f'\\x{ord(ch):02x}' if ch <= '\xff' else ascii(ch)[1:-1]
+                   for ch in text)
+
+def sanitize_xml(text):
+    return ILLEGAL_XML_CHARS_RE.sub(_sanitize_xml_replace, text)
